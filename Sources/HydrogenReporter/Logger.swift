@@ -113,7 +113,7 @@ public class Logger: ObservableObject {
                 let output = self.stdoutInputPipe.fileHandleForReading.availableData
                 let outputString = String(data: output, encoding: String.Encoding.utf8) ?? ""
                 
-                DispatchQueue.main.async {
+                self.updateQueue.async {
                     self.consoleOutput += outputString
                     self.stdout += outputString
                 }
@@ -128,7 +128,7 @@ public class Logger: ObservableObject {
                 let output = self.stderrInputPipe.fileHandleForReading.availableData
                 let outputString = String(data: output, encoding: String.Encoding.utf8) ?? ""
                 
-                DispatchQueue.main.async {
+                self.updateQueue.async {
                     self.consoleOutput += outputString
                     self.stderr += outputString
                 }
