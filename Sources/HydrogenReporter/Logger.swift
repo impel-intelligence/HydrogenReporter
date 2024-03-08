@@ -1,155 +1,13 @@
-//
-//  Logger.swift
-//  
-//
-//  Created by Taylor Lineman on 4/19/23.
-//
-
 import Foundation
 import os
 
-public class Logger: ObservableObject {
-    // MARK: Supporting Structures
-    public enum LogLevel: String, Codable {
-        case fatal
-        case error
-        case warn
-        case info
-        case success
-        case working
-        case debug
-        
-        public func emoji() -> String {
-            switch self {
-            case .fatal: return "🛑"
-            case .error: return "🥲"
-            case .warn:  return "⚠️"
-            case .info:  return "🤖"
-            case .success: return "✅"
-            case .working:  return "⚙️"
-            case .debug: return "🔵"
-            }
-        }
-    }
-    
-    // MARK: Logger Complexity
-    public enum LogComplexity: String, Codable {
-        case simple
-        case complex
-    }
-    
-    // MARK: Logger text output for using print
-    public struct LoggerOutputStream: TextOutputStream {
-        private var content: String
-        
-        init(prefix: String) {
-            content = prefix + " "
-        }
-        
-        public mutating func write(_ string: String) {
-            content.append(string)
-        }
-        
-        public func retrieveContent() -> String {
-            return content
-        }
-    }
-    
-    // MARK: Logger Config
-    public struct LoggerConfig: Codable {
-        let applicationName: String
-        
-        public let defaultLevel: LogLevel
-        public let defaultComplexity: LogComplexity
-        let leadingEmoji: String
-        let locale: String
-        let timezone: String
-        let dateFormat: String
-        
-        let historyLength: Int
-        let sendHydrogenLogsToReporterConsole: Bool
-        
-        public static let defaultConfig: LoggerConfig =  .init(applicationName: "Hydrogen Reporter", defaultLevel: .info, defaultComplexity: .simple, leadingEmoji: "⚫️")
-        
-        public init(applicationName: String, defaultLevel: LogLevel, defaultComplexity: LogComplexity, leadingEmoji: String, locale: String = "en_US", timezone: String = "en_US", dateFormat: String = "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX", historyLength: Int = 100000, sendHydrogenLogsToReporterConsole: Bool = true) {
-            self.applicationName = applicationName
-            self.defaultLevel = defaultLevel
-            self.defaultComplexity = defaultComplexity
-            self.leadingEmoji = leadingEmoji
-            self.locale = locale
-            self.timezone = timezone
-            self.dateFormat = dateFormat
-            self.historyLength = historyLength
-            self.sendHydrogenLogsToReporterConsole = sendHydrogenLogsToReporterConsole
-        }
-        
-        
-        func dateFormatter() -> DateFormatter {
-            let formatter = DateFormatter()
-            formatter.calendar = Calendar(identifier: .iso8601)
-            formatter.locale = Locale(identifier: locale)
-            formatter.timeZone = TimeZone(identifier: timezone)
-            formatter.dateFormat = dateFormat
-            return formatter
-        }
-    }
-    
-    public struct LogItem: CustomStringConvertible, Identifiable {
-        public var id: UUID = UUID()
-        
-        let creationData: Date
-        let items: [Any]
-        let separator: String
-        let terminator: String
-        
-        public let level: LogLevel
-        let complexity: LogComplexity
-        
-        let file: String
-        let line: UInt
-        let function: String
-        
-        let leader: String
-        
-        var emoji: String {
-            return level.emoji()
-        }
-        
-        public var description: String {
-            switch complexity {
-            case .simple:
-                return simpleDescription
-            case .complex:
-                return complexDescription
-            }
-        }
-        
-        var simpleDescription: String {
-            var outputStream: LoggerOutputStream = LoggerOutputStream(prefix: "\(Logger.shared.config.leadingEmoji) \(emoji)")
-            print(items, separator: separator, terminator: terminator, to: &outputStream)
-            
-            return outputStream.retrieveContent()
-        }
-        
-        var complexDescription: String {
-            var outputStream: LoggerOutputStream = LoggerOutputStream(prefix: "\(Logger.shared.config.leadingEmoji) \(emoji)")
-            print(items, separator: separator, to: &outputStream)
-            #if DEBUG
-            outputStream.write(" - \(file) @ line \(line), in function \(function)")
-            #else
-            outputStream.write(" - @ line \(line), in function \(function)")
-            #endif
-            
-            return outputStream.retrieveContent()
-        }
-    }
-    
+public class Logger: ObservableObject {    
     // MARK: - Singleton
     public static let shared = Logger()
     
-    fileprivate var config: LoggerConfig = .defaultConfig
+    internal var config: LoggerConfig = .defaultConfig
     
-    @Published public var logs: [LogItem] = []
+    public var logs: LinkedList<LogItem> = LinkedList()
     
     // MARK: Console Intercepting
     internal var originalSTDOUTDescriptor: Int32
@@ -161,12 +19,14 @@ public class Logger: ObservableObject {
     internal let stderrInputPipe = Pipe()
     internal let stderrOutputPipe = Pipe()
     
-    @Published public var consoleOutput: String = ""
-    @Published public var stdout: String = ""
-    @Published public var stderr: String = ""
+    public var consoleOutput: String = ""
+    public var stdout: String = ""
+    public var stderr: String = ""
     
     var isInterceptingConsoleOutput: Bool = false
     
+    private let updateQueue = DispatchQueue(label: "hydrogen_queue", qos: .utility)
+
     init() {
         originalSTDOUTDescriptor = FileHandle.standardOutput.fileDescriptor
         originalSTDERRDescriptor = FileHandle.standardError.fileDescriptor
@@ -202,11 +62,11 @@ public class Logger: ObservableObject {
     }
     
     private func appendLog(log: LogItem, description: String) {
-        DispatchQueue.main.async {
-            self.logs.append(log)
+        updateQueue.async {
+            self.logs.append(value: log)
             
             if self.logs.count > self.config.historyLength {
-                self.logs.removeFirst()
+                self.logs.removeTail()
             }
             
             self.consoleOutput.append(description)
@@ -253,7 +113,7 @@ public class Logger: ObservableObject {
                 let output = self.stdoutInputPipe.fileHandleForReading.availableData
                 let outputString = String(data: output, encoding: String.Encoding.utf8) ?? ""
                 
-                DispatchQueue.main.async {
+                self.updateQueue.async {
                     self.consoleOutput += outputString
                     self.stdout += outputString
                 }
@@ -268,7 +128,7 @@ public class Logger: ObservableObject {
                 let output = self.stderrInputPipe.fileHandleForReading.availableData
                 let outputString = String(data: output, encoding: String.Encoding.utf8) ?? ""
                 
-                DispatchQueue.main.async {
+                self.updateQueue.async {
                     self.consoleOutput += outputString
                     self.stderr += outputString
                 }
@@ -291,18 +151,20 @@ public class Logger: ObservableObject {
         let currentDate = config.dateFormatter().string(from: Date())
         var compiledLogs: String = "\(config.applicationName) logs for \(currentDate)\n"
         
-        let totalLogs = logs.count
-        let totalFatalLogs = logs.filter({$0.level == .fatal}).count
-        let totalErrorLogs = logs.filter({$0.level == .error}).count
-        let totalWarnLogs = logs.filter({$0.level == .warn}).count
-        let totalInfoLogs = logs.filter({$0.level == .info}).count
-        let totalSuccessLogs = logs.filter({$0.level == .success}).count
-        let totalWorkingLogs = logs.filter({$0.level == .working}).count
-        let totalDebugLogs = logs.filter({$0.level == .debug}).count
+        let logArray = logs.reversed().collectElements()
+        
+        let totalLogs = logArray.count
+        let totalFatalLogs = logArray.filter({$0.level == .fatal}).count
+        let totalErrorLogs = logArray.filter({$0.level == .error}).count
+        let totalWarnLogs = logArray.filter({$0.level == .warn}).count
+        let totalInfoLogs = logArray.filter({$0.level == .info}).count
+        let totalSuccessLogs = logArray.filter({$0.level == .success}).count
+        let totalWorkingLogs = logArray.filter({$0.level == .working}).count
+        let totalDebugLogs = logArray.filter({$0.level == .debug}).count
         
         let newTotalLogs = totalLogs == 0 ? 1 : totalLogs
         // Statistics Data to be logged at the top of the file
-        compiledLogs.append("--- ✨ Total Logs: \(logs.count) ---\n")
+        compiledLogs.append("--- ✨ Total Logs: \(logArray.count) ✨ ---\n")
         compiledLogs.append("--- \(LogLevel.fatal.emoji()) Total Fatal Error Logs: \(totalFatalLogs) ---\n")
         compiledLogs.append("--- \(LogLevel.error.emoji()) Total Error Logs: \(totalErrorLogs) ---\n")
         compiledLogs.append("--- \(LogLevel.warn.emoji()) Total Warn Logs: \(totalWarnLogs) ---\n")
@@ -321,7 +183,7 @@ public class Logger: ObservableObject {
         
         compiledLogs.append("=== START LOGS ===\n")
         
-        compiledLogs.append(logs.compactMap({$0.complexDescription}).joined(separator: "\n"))
+        compiledLogs.append(logArray.compactMap({$0.complexDescription}).joined(separator: "\n"))
         
         compiledLogs.append("\n=== END LOGS ===")
         
@@ -368,8 +230,8 @@ extension Logger {
 public func LOG(_ items: Any...,
                 separator: String = " ",
                 terminator: String = "",
-                level: Logger.LogLevel = Logger.shared.getLoggerConfig().defaultLevel,
-                complexity: Logger.LogComplexity = Logger.shared.getLoggerConfig().defaultComplexity,
+                level: LogLevel = Logger.shared.getLoggerConfig().defaultLevel,
+                complexity: LogComplexity = Logger.shared.getLoggerConfig().defaultComplexity,
                 file: String = #file, line: UInt = #line, function: String = #function) {
-    Logger.shared.log(Logger.LogItem(creationData: Date(), items: items, separator: separator, terminator: terminator, level: level, complexity: complexity, file: file, line: line, function: function, leader: Logger.shared.getLoggerConfig().leadingEmoji))
+    Logger.shared.log(LogItem(creationData: Date(), items: items, separator: separator, terminator: terminator, level: level, complexity: complexity, file: file, line: line, function: function, leader: Logger.shared.getLoggerConfig().leadingEmoji))
 }
