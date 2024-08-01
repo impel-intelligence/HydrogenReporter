@@ -13,10 +13,11 @@ public struct LoggerConfig: Codable {
     
     let historyLength: Int
     let sendHydrogenLogsToReporterConsole: Bool
+    let logFile: URL?
     
     public static let defaultConfig: LoggerConfig =  .init(applicationName: "Hydrogen Reporter", defaultLevel: .info, defaultComplexity: .simple, leadingEmoji: "⚫️")
     
-    public init(applicationName: String, defaultLevel: LogLevel, defaultComplexity: LogComplexity, leadingEmoji: String, locale: String = "en_US", timezone: String = "en_US", dateFormat: String = "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX", historyLength: Int = 100000, sendHydrogenLogsToReporterConsole: Bool = true) {
+    public init(applicationName: String, defaultLevel: LogLevel, defaultComplexity: LogComplexity, leadingEmoji: String, locale: String = "en_US", timezone: String = "en_US", dateFormat: String = "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX", historyLength: Int = 100000, sendHydrogenLogsToReporterConsole: Bool = true, logFile: URL? = nil) {
         self.applicationName = applicationName
         self.defaultLevel = defaultLevel
         self.defaultComplexity = defaultComplexity
@@ -26,6 +27,7 @@ public struct LoggerConfig: Codable {
         self.dateFormat = dateFormat
         self.historyLength = historyLength
         self.sendHydrogenLogsToReporterConsole = sendHydrogenLogsToReporterConsole
+        self.logFile = logFile
     }
     
     

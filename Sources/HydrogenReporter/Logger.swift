@@ -1,11 +1,11 @@
 import Foundation
 import os
 
-public class Logger: ObservableObject {    
+public class Logger: ObservableObject {
     // MARK: - Singleton
     public static let shared = Logger()
     
-    internal var config: LoggerConfig = .defaultConfig
+    private(set) var config: LoggerConfig = .defaultConfig
     
     public var logs: LinkedList<LogItem> = LinkedList()
     
@@ -22,10 +22,11 @@ public class Logger: ObservableObject {
     public var consoleOutput: String = ""
     public var stdout: String = ""
     public var stderr: String = ""
-    
+    public var logFile: LogOutputFileStream?
+
     var isInterceptingConsoleOutput: Bool = false
     
-    private let updateQueue = DispatchQueue(label: "hydrogen_queue", qos: .utility)
+    private let updateQueue = DispatchQueue(label: "hydrogen_queue", qos: .utility, attributes: .concurrent)
 
     init() {
         originalSTDOUTDescriptor = FileHandle.standardOutput.fileDescriptor
@@ -34,30 +35,32 @@ public class Logger: ObservableObject {
     }
     
     func log(_ item: LogItem) {
-        switch item.level {
-        case .fatal:
-            let desc = item.complexDescription
-            appendLog(log: item, description: desc)
-            os_log(.fault, "%{public}s", desc)
-            Swift.fatalError(item.complexDescription)
-        case .error:
-            let desc = item.description
-            appendLog(log: item, description: desc)
-            os_log(.error, "%{public}s", desc)
-        case .warn, .working, .success:
-            let desc = item.description
-            appendLog(log: item, description: desc)
-            os_log(.default, "%{public}s", desc)
-        case .info:
-            let desc = item.description
-            appendLog(log: item, description: desc)
-            os_log(.info, "%{public}s", desc)
-        case .debug:
-            #if DEBUG
-            let desc = item.description
-            appendLog(log: item, description: desc)
-            os_log(.debug, "%{public}s", desc)
-            #endif
+        updateQueue.async {
+            switch item.level {
+            case .fatal:
+                let desc = item.complexDescription
+                self.appendLog(log: item, description: desc)
+                os_log(.fault, "%{public}s", desc)
+                Swift.fatalError(item.complexDescription)
+            case .error:
+                let desc = item.description
+                self.appendLog(log: item, description: desc)
+                os_log(.error, "%{public}s", desc)
+            case .warn, .working, .success:
+                let desc = item.description
+                self.appendLog(log: item, description: desc)
+                os_log(.default, "%{public}s", desc)
+            case .info:
+                let desc = item.description
+                self.appendLog(log: item, description: desc)
+                os_log(.info, "%{public}s", desc)
+            case .debug:
+#if DEBUG
+                let desc = item.description
+                self.appendLog(log: item, description: desc)
+                os_log(.debug, "%{public}s", desc)
+#endif
+            }
         }
     }
     
@@ -219,9 +222,13 @@ public class Logger: ObservableObject {
 extension Logger {
     public func setLoggerConfig(config: LoggerConfig) {
         self.config = config
+        
+        if let logFile = config.logFile { // Create a log text file
+            self.logFile = LogOutputFileStream(logFile: logFile)
+        }
     }
     
-    public func getLoggerConfig() -> LoggerConfig {
+    nonisolated public func getLoggerConfig() -> LoggerConfig {
         return config
     }
 }
